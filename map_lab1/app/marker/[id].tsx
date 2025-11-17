@@ -1,3 +1,4 @@
+// app/marker/[id].tsx
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -6,84 +7,62 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import ImageList from '../../components/ImageList';
-import { MarkerData, MarkerImage } from '../../types';
+import { MarkerData } from '../../types';
+import { useDatabase } from '../contexts/DatabaseContext';
+import { ImageList } from '../../components/ImageList';
 
-// Mock данные для демонстрации
-let allMarkers: MarkerData[] = [
-  {
-    id: '1',
-    title: 'Пермь, центр',
-    coordinate: {
-      latitude: 58.010455,
-      longitude: 56.229443,
-    },
-    images: [],
-    createdAt: new Date(),
-  },
-  {
-    id: '2',
-    title: 'Пермь, точка 2',
-    coordinate: {
-      latitude: 58.010475,
-      longitude: 56.229963,
-    },
-    images: [],
-    createdAt: new Date(),
-  },
-];
-
-/**
- * Экран деталей маркера
- * Показывает информацию о маркере и управляет его изображениями
- */
 export default function MarkerDetails() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { getMarker, addImage, deleteImage } = useDatabase();
+  
   const [marker, setMarker] = useState<MarkerData | null>(null);
-  const [images, setImages] = useState<MarkerImage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddingImage, setIsAddingImage] = useState(false);
 
-  /**
-   * Загрузка данных маркера при монтировании компонента
-   */
   useEffect(() => {
-    loadMarkerData();
+    console.log('📱 Экрана деталей маркера, ID:', id);
+    if (id) {
+      loadMarkerData();
+    }
   }, [id]);
 
-  /**
-   * Загрузка данных маркера по ID из mock данных
-   */
-  const loadMarkerData = () => {
+  const loadMarkerData = async () => {
     try {
+      setIsLoading(true);
+      
       if (!id) {
-        Alert.alert('Ошибка', 'ID маркера не указан');
-        router.back();
-        return;
+        throw new Error('ID маркера не указан');
       }
 
-      const foundMarker = allMarkers.find(m => m.id === id);
+      const markerId = parseInt(id);
+      const foundMarker = await getMarker(markerId);
+      
       if (foundMarker) {
+        console.log('✅ Данные маркера загружены:', foundMarker.title);
         setMarker(foundMarker);
-        setImages(foundMarker.images);
       } else {
-        Alert.alert('Ошибка', 'Маркер не найден');
+        console.log('⚠️ Маркер не найден в базе данных, ID:', id);
+        Alert.alert('Ошибка', 'Маркер не найден в базе данных');
         router.back();
       }
     } catch (error) {
-      console.error('Ошибка загрузки данных маркера:', error);
-      Alert.alert('Ошибка', 'Не удалось загрузить данные маркера');
+      console.error('❌ Ошибка загрузки данных маркера:', error);
+      Alert.alert('Ошибка', 'Не удалось загрузить данные маркера из базы данных');
+      router.back();
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  /**
-   * Добавление нового изображения к маркеру
-   * Запрашивает разрешения и открывает галерею
-   */
   const handleAddImage = async () => {
     try {
+      setIsAddingImage(true);
+
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (status !== 'granted') {
@@ -99,81 +78,93 @@ export default function MarkerDetails() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const newImage: MarkerImage = {
-          id: Date.now().toString(),
-          uri: result.assets[0].uri,
-          fileName: result.assets[0].fileName || undefined,
-          width: result.assets[0].width,
-          height: result.assets[0].height,
-        };
+        const selectedImage = result.assets[0];
+        
+        if (!marker || !id) {
+          throw new Error('Маркер не загружен');
+        }
 
-        const updatedImages = [...images, newImage];
-        updateMarkerImages(updatedImages);
-        console.log('Изображение добавлено:', newImage);
+        console.log('📸 Изображение выбрано, добавление в базу...');
+        await addImage(marker.id, selectedImage.uri);
+        
+        await loadMarkerData();
+        
+        Alert.alert('Успех', 'Изображение успешно добавлено к маркеру');
+      } else {
+        console.log('👤 Пользователь отменил выбор изображения');
       }
     } catch (error) {
-      console.error('Ошибка при выборе изображения:', error);
-      Alert.alert('Ошибка', 'Не удалось добавить изображение');
+      console.error('❌ Ошибка при добавлении изображения:', error);
+      Alert.alert('Ошибка', 'Не удалось добавить изображение в базу данных');
+    } finally {
+      setIsAddingImage(false);
     }
   };
 
-  /**
-   * Удаление изображения из маркера
-   */
-  const handleDeleteImage = (imageId: string) => {
-    const updatedImages = images.filter(img => img.id !== imageId);
-    updateMarkerImages(updatedImages);
-    console.log('Изображение удалено:', imageId);
+  const handleDeleteImage = (imageId: number) => {
+    console.log('🗑️ Удаление изображения:', imageId);
+    deleteImage(imageId)
+      .then(() => {
+        loadMarkerData();
+        Alert.alert('Успех', 'Изображение удалено');
+      })
+      .catch(error => {
+        console.error('❌ Ошибка при удалении изображения:', error);
+        Alert.alert('Ошибка', 'Не удалось удалить изображение из базы данных');
+      });
   };
 
-  /**
-   * Обновление списка изображений маркера в состоянии и mock данных
-   */
-  const updateMarkerImages = (updatedImages: MarkerImage[]) => {
-    setImages(updatedImages);
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#71a7e0ff" />
+        <Text style={styles.loadingText}>Загрузка данных маркера...</Text>
+        <Text style={styles.loadingSubtext}>ID: {id}</Text>
+      </View>
+    );
+  }
 
-    if (marker && id) {
-      const updatedMarker = { ...marker, images: updatedImages };
-      setMarker(updatedMarker);
-      
-      // Обновление в mock данных
-      const markerIndex = allMarkers.findIndex(m => m.id === id);
-      if (markerIndex !== -1) {
-        allMarkers[markerIndex] = updatedMarker;
-      }
-    }
-  };
-
-  // Отображение загрузки, если маркер еще не загружен
   if (!marker) {
     return (
-      <View style={styles.container}>
-        <Text>Загрузка...</Text>
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Маркер не найден</Text>
+        <Text style={styles.errorSubtext}>ID: {id}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Назад к карте</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.container}>
-      {/* Заголовок с информацией о маркере */}
+      {/* Заголовок и информация о местоположении */}
       <View style={styles.header}>
         <Text style={styles.title}>{marker.title}</Text>
-        <Text style={styles.coordinates}>
-          Широта: {marker.coordinate.latitude.toFixed(6)}
-          {'\n'}
-          Долгота: {marker.coordinate.longitude.toFixed(6)}
-        </Text>
+        <View style={styles.coordinatesContainer}>
+          <Text style={styles.coordinatesLabel}>Координаты:</Text>
+          <Text style={styles.coordinates}>
+            Широта: {marker.coordinate.latitude.toFixed(6)}
+          </Text>
+          <Text style={styles.coordinates}>
+            Долгота: {marker.coordinate.longitude.toFixed(6)}
+          </Text>
+        </View>
         <Text style={styles.createdAt}>
-          Создан: {marker.createdAt.toLocaleDateString('ru-RU')}
+          Создан: {new Date(marker.created_at).toLocaleDateString('ru-RU')}
+        </Text>
+        <Text style={styles.markerId}>
+          ID маркера: {marker.id}
         </Text>
       </View>
 
-      {/* Компонент списка изображений */}
+      {/* Секция изображений через компонент */}
       <ImageList
-        images={images}
-        onAddImage={handleAddImage}
+        images={marker.images}
         onDeleteImage={handleDeleteImage}
-        emptyText="Нет добавленных изображений"
+        onAddImage={handleAddImage}
+        isAddingImage={isAddingImage}
+        markerTitle={marker.title}
       />
 
       {/* Кнопка возврата */}
@@ -190,31 +181,88 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 16,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ff3b30',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
   header: {
     marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
     color: '#333',
+    textAlign: 'center',
+  },
+  coordinatesContainer: {
+    marginBottom: 8,
+  },
+  coordinatesLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
   },
   coordinates: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
-    marginBottom: 8,
-    lineHeight: 22,
+    marginBottom: 2,
+    fontFamily: 'monospace',
   },
   createdAt: {
     fontSize: 14,
     color: '#999',
+    marginBottom: 4,
+  },
+  markerId: {
+    fontSize: 12,
+    color: '#ccc',
+    fontFamily: 'monospace',
   },
   backButton: {
     backgroundColor: '#8E8E93',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 8,
   },
   backButtonText: {
     color: '#fff',

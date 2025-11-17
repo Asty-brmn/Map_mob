@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "map_lab1",
-    "slug": "map_lab1",
+    "name": "map_lab",
+    "slug": "map_lab",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "maplab1",
+    "scheme": "maplab",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -39,7 +39,8 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
